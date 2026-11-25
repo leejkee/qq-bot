@@ -21,7 +21,8 @@ test('config validation and restart with a changed model', () => {
 });
 
 test('signed webhook, independent questions, slow responses, redelivery and send failures', async t => {
-  const requests = [], sends = [];
+  const requests = [], sends = [], logs = [];
+  t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
   const slow = Promise.withResolvers();
   const answer = createAnswer(config.llm, async (_url, options) => {
     const body = JSON.parse(options.body);
@@ -36,7 +37,12 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   bot.self_id = 'self';
   bot.request.defaults.adapter = async req => {
     sends.push({url:req.url, data: JSON.parse(req.data)});
-    if (sends.at(-1).data.content.endsWith('sendfail')) throw Error('send failed');
+    if (sends.at(-1).data.content.endsWith('sendfail')) {
+      throw Object.assign(new Error('send failed'), {config: req, response: {
+        data: JSON.stringify({code: 11292, message: 'permission denied (sensitive diagnostic text)'}),
+        status: 403, headers: {'x-tps-trace-id': 'test-trace'}, config: req
+      }});
+    }
     return {data: {id:'sent'}, status:200, statusText:'OK', headers:{}, config:req};
   };
   const server = bot.receiver.handler.server;
@@ -83,6 +89,10 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   await nextTurn();
   assert.equal(sends.length,7);
   assert.ok(sends.every(s => s.data.msg_type === 0));
+  assert.deepEqual(logs.find(log => log.stage === 'qq_reply_api_error'), {
+    stage: 'qq_reply_api_error', http_status: 403, qq_code: 11292,
+    trace_id: 'test-trace', hint: 'permission', sandbox: true
+  });
   assert.ok(sends.slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
   const questions=['slow','second','timeout','empty','error','sendfail','next'];
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));

@@ -28,12 +28,37 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     intents: ['GROUP_AND_C2C_EVENT'], mode: ReceiverMode.WEBHOOK, port: 3000, path: '/qq/callback',
     logLevel: 'off'
   });
-  // SDK 1.2.3 omits the required msg_type field for plain text replies.
   bot.request.interceptors.request.use(request => {
-    if (request.method === 'post' && /^\/v2\/groups\/[^/]+\/messages$/.test(request.url ?? '') &&
-        typeof request.data?.content === 'string' && request.data.msg_type === undefined) {
+    if (request.method !== 'post' || !/^\/v2\/groups\/[^/]+\/messages$/.test(request.url ?? '')) {
+      return request;
+    }
+    // SDK 1.2.3 omits the required msg_type field for plain text replies.
+    if (typeof request.data?.content === 'string' && request.data.msg_type === undefined) {
       request.data.msg_type = 0;
     }
+    const transforms = [request.transformResponse ?? []].flat();
+    request.transformResponse = [...transforms, (data, headers, status) => {
+      // The SDK response interceptor drops HTTP status and headers when throwing.
+      if ((status ?? 0) >= 400 || (typeof data?.code === 'number' && data.code !== 0)) {
+        const trace = headers.get('x-tps-trace-id');
+        const message = typeof data?.message === 'string' ? data.message : '';
+        const hints = [
+          [/白名单|whitelist|allowlist/i, 'ip_allowlist'],
+          [/沙箱|sandbox/i, 'sandbox'],
+          [/审核|敏感|risk control|moderation/i, 'moderation'],
+          [/权限|permission/i, 'permission'],
+          [/msg_id|event_id|msg_seq/i, 'reply_reference']
+        ] as const;
+        console.info(JSON.stringify({
+          stage: 'qq_reply_api_error', http_status: status,
+          qq_code: typeof data?.code === 'number' ? data.code : undefined,
+          trace_id: typeof trace === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(trace) ? trace : undefined,
+          hint: hints.find(([pattern]) => pattern.test(message))?.[1],
+          sandbox: config.sandbox
+        }));
+      }
+      return data;
+    }];
     return request;
   });
   const seen = new Set<string>();
