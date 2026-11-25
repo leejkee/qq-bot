@@ -97,3 +97,28 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const questions=['slow','second','timeout','empty','error','sendfail','next'];
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));
 });
+
+test('DeepSeek search is opt-in and the provider runs it in a single request', async t => {
+  assert.throws(() => readConfig({...env, LLM_WEB_SEARCH: 'yes'}), /LLM_WEB_SEARCH/);
+  assert.throws(() => readConfig({...env, LLM_WEB_SEARCH: 'true'}), /DeepSeek/);
+  assert.equal(readConfig(env).llm.webSearch, false);
+  const settings = readConfig({...env, LLM_WEB_SEARCH: 'true', LLM_MODEL: 'deepseek-flash',
+    LLM_CHAT_URL: 'https://api.deepseek.com/chat/completions'}).llm;
+  const logs = [];
+  t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  let requests = 0;
+  const answer = createAnswer(settings, async (url, options) => {
+    requests++;
+    assert.equal(url, settings.url);
+    assert.deepEqual(JSON.parse(options.body), {
+      model: 'deepseek-flash', stream: false, messages: [{role: 'user', content: '最近更新了什么？'}],
+      tools: [{type: 'deepseek_web_search'}], thinking: {type: 'disabled'}
+    });
+    return Response.json({choices: [{message: {content: '更新摘要', server_tool_calls: [
+      {calls: [{type: 'deepseek_web_search', status: 'completed'}]}
+    ]}}]});
+  });
+  assert.equal(await answer('最近更新了什么？'), '更新摘要');
+  assert.equal(requests, 1);
+  assert.deepEqual(logs, [{stage: 'llm_web_search_completed'}]);
+});

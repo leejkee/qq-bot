@@ -32,7 +32,7 @@ sudo chmod 600 /etc/qqbot/qqbot.env
 sudoedit /etc/qqbot/qqbot.env
 ```
 
-按 [.env.example](.env.example) 填写六个变量。BOT_APPID 和 BOT_SECRET 来自 QQ 开放平台；BOT_SANDBOX 填 true 或 false，与测试群或生产环境一致。LLM_CHAT_URL 填兼容 Chat Completions 的完整 HTTPS 地址，LLM_MODEL 填账户可用的模型 ID。环境文件由 root 持有，systemd 在启动时读取。更改模型名或密钥后重启服务。
+按 [.env.example](.env.example) 填写运行配置。BOT_APPID 和 BOT_SECRET 来自 QQ 开放平台；BOT_SANDBOX 填 true 或 false，与测试群或生产环境一致。LLM_CHAT_URL 填兼容 Chat Completions 的完整 HTTPS 地址，LLM_MODEL 填账户可用的模型 ID。环境文件由 root 持有，systemd 在启动时读取。更改模型名或密钥后重启服务。
 
 ```sh
 sudo install -m 0644 deploy/qqbot.service /etc/systemd/system/qqbot.service
@@ -49,6 +49,14 @@ sudo journalctl -u qqbot -n 50
 ```
 
 启动成功会记录 `qq_webhook_ready`。缺项或配置格式错误会以 78 退出；修正后执行 `sudo systemctl restart qqbot`。业务日志含处理阶段、耗时及可用错误码。SDK 自带的群聊正文日志已关闭。
+
+## DeepSeek 联网搜索
+
+在运行配置中设置 `LLM_WEB_SEARCH=true`，使用 DeepSeek 官方 Chat Completions 地址和支持联网搜索的模型。官方示例使用 `LLM_CHAT_URL=https://api.deepseek.com/chat/completions` 与 `LLM_MODEL=deepseek-flash`。模型名仍由 `LLM_MODEL` 指定。配置生效需要重启机器人。
+
+开启后，每条群 @ 依旧独立请求。DeepSeek 根据问题决定是否搜索，应用等待完整回复，超时上限为 45 秒。看到 `llm_web_search_completed` 表示 DeepSeek 报告完成了一次搜索；群中发送回答正文。设为 `false` 或省略该变量可继续使用普通问答，兼容其他模型供应商。
+
+[DeepSeek Web Tools 文档](https://api-docs.deepseek.com/guides/web_tools/)
 
 ## 接入 QQ 开放平台
 
