@@ -28,6 +28,14 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     intents: ['GROUP_AND_C2C_EVENT'], mode: ReceiverMode.WEBHOOK, port: 3000, path: '/qq/callback',
     logLevel: 'off'
   });
+  // SDK 1.2.3 omits the required msg_type field for plain text replies.
+  bot.request.interceptors.request.use(request => {
+    if (request.method === 'post' && /^\/v2\/groups\/[^/]+\/messages$/.test(request.url ?? '') &&
+        typeof request.data?.content === 'string' && request.data.msg_type === undefined) {
+      request.data.msg_type = 0;
+    }
+    return request;
+  });
   const seen = new Set<string>();
   bot.on('message.group', async (event: GroupMessageEvent) => {
     const segments = Array.isArray(event.message) ? event.message : [event.message];

@@ -82,6 +82,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   }
   await nextTurn();
   assert.equal(sends.length,7);
+  assert.ok(sends.every(s => s.data.msg_type === 0));
   assert.ok(sends.slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
   const questions=['slow','second','timeout','empty','error','sendfail','next'];
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));
