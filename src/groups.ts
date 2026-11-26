@@ -14,7 +14,7 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
     // Only the current message's content enters the text parser. Reference/attachment structs stay out.
     const content = data.content.replace(/<@!?[^<>\s]+>/g, '').trim();
     if (!content) return;
-    super.dispatchEvent(type, {...packet, d: {id: data.id, group_id: group, content, author: {...author, id: author.member_openid || author.id}, timestamp: data.timestamp, mentions: []}});
+    super.dispatchEvent(type, {...packet, d: {id: data.id, group_id: group, content, author, timestamp: data.timestamp, mentions: []}});
   }
 }
 
@@ -76,10 +76,8 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
       `/v2/groups/${encodeURIComponent(event.group_id)}/messages`,
       {content, msg_type: 0, msg_id: event.message_id, msg_seq: sequence}
     );
-    const sender = event.user_id;
-    const mention = sender && !/["<>&\s]/.test(sender) ? `<qqbot-at-user id="${sender}" /> ` : '';
     try {
-      await reply(mention + '正在烧脑中，请稍后...', 1);
+      await reply('正在烧脑中，请稍后...', 1);
     } catch {
       logStage('qq_ack_failed', started);
     }

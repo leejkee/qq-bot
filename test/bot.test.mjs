@@ -83,8 +83,8 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   await nextTurn();
   const feedback = sends.filter(s => s.data.msg_seq === 1);
   assert.deepEqual(feedback.map(s => s.data.content), [
-    '<qqbot-at-user id="member" /> 正在烧脑中，请稍后...',
-    '<qqbot-at-user id="another" /> 正在烧脑中，请稍后...'
+    '正在烧脑中，请稍后...',
+    '正在烧脑中，请稍后...'
   ]);
   assert.deepEqual(sends.filter(s => s.data.msg_seq === 2).map(s=>[s.url,s.data.msg_id,s.data.content]),[
     ['/v2/groups/B/messages','same','<image> second'],['/v2/groups/A/messages','same','<image> slow']]);
