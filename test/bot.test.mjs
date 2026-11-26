@@ -77,23 +77,28 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   assert.equal((await post(first)).status,200);
   await post(first);
   assert.equal(requests.length,1);
-  assert.equal(sends.length,0);
+  assert.equal(sends.length,1);
   await post(at('same','second',{group_openid:'B',author:{member_openid:'another'}}));
   slow.resolve();
   await nextTurn();
-  assert.deepEqual(sends.map(s=>[s.url,s.data.msg_id,s.data.content]),[
+  const feedback = sends.filter(s => s.data.msg_seq === 1);
+  assert.deepEqual(feedback.map(s => s.data.content), [
+    '<qqbot-at-user id="member" /> 正在烧脑中，请稍后...',
+    '<qqbot-at-user id="another" /> 正在烧脑中，请稍后...'
+  ]);
+  assert.deepEqual(sends.filter(s => s.data.msg_seq === 2).map(s=>[s.url,s.data.msg_id,s.data.content]),[
     ['/v2/groups/B/messages','same','<image> second'],['/v2/groups/A/messages','same','<image> slow']]);
   for(const q of ['timeout','empty','error','sendfail','next']) {
     await post(at(q,q)); await post(at(q,q));
   }
   await nextTurn();
-  assert.equal(sends.length,7);
+  assert.equal(sends.length,14);
   assert.ok(sends.every(s => s.data.msg_type === 0));
   assert.deepEqual(logs.find(log => log.stage === 'qq_reply_api_error'), {
     stage: 'qq_reply_api_error', http_status: 403, qq_code: 11292,
     trace_id: 'test-trace', hint: 'permission', sandbox: true
   });
-  assert.ok(sends.slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
+  assert.ok(sends.filter(s => s.data.msg_seq === 2).slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
   const questions=['slow','second','timeout','empty','error','sendfail','next'];
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));
 });
