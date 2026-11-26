@@ -14,7 +14,7 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
     // Only the current message's content enters the text parser. Reference/attachment structs stay out.
     const content = data.content.replace(/<@!?[^<>\s]+>/g, '').trim();
     if (!content) return;
-    super.dispatchEvent(type, {...packet, d: {id: data.id, group_id: group, content, author, timestamp: data.timestamp, mentions: []}});
+    super.dispatchEvent(type, {...packet, d: {id: data.id, group_id: group, content, author: {...author, id: author.member_openid || author.id}, timestamp: data.timestamp, mentions: []}});
   }
 }
 
@@ -72,6 +72,17 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     setTimeout(() => seen.delete(key), 600_000).unref();
     const started = Date.now();
     logStage('group_at_received', started);
+    const reply = (content: string, sequence: number) => bot.request.post(
+      `/v2/groups/${encodeURIComponent(event.group_id)}/messages`,
+      {content, msg_type: 0, msg_id: event.message_id, msg_seq: sequence}
+    );
+    const sender = event.user_id;
+    const mention = sender && !/["<>&\s]/.test(sender) ? `<qqbot-at-user id="${sender}" /> ` : '';
+    try {
+      await reply(mention + '正在烧脑中，请稍后...', 1);
+    } catch {
+      logStage('qq_ack_failed', started);
+    }
     let text: string;
     try {
       text = await answer(question);
@@ -82,8 +93,8 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     }
     const sending = Date.now();
     try {
-      // Passing a text element prevents SDK markup parsing of the model's answer.
-      await event.reply({type: 'text', data: {text}});
+      // Send the answer as plain text with its own passive reply sequence.
+      await reply(text, 2);
       logStage('qq_replied', sending);
     } catch (error) {
       const code = error instanceof Error && error.message.match(/failed with code\((\d+)\)/);
