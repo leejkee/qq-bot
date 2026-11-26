@@ -17,6 +17,8 @@ pnpm build
 
 ## 部署到 Debian VPS
 
+手动 SSH 登录后，可以在项目根目录执行 `bash deploy/start.sh` 后台启动已构建的版本。更新代码后先重新构建。脚本优先使用 `/opt/node22/bin/node`，读取已有的 `.env.save`（可选），再用 `.env` 覆盖同名配置。关闭 SSH 后进程可继续运行。用 `tail -f .run/qqbot.log` 查看日志，看到 `qq_webhook_ready` 表示就绪。用 `kill <启动时显示的PID>` 停止。若已有 systemd 服务运行，脚本会提示并退出。
+
 安装 [Node.js 22 的 Linux 发行包](https://nodejs.org/dist/latest-v22.x/)，按服务器 CPU 选择架构，将解压目录的 `bin` 加入 PATH。执行 `node --version` 确认主版本为 22。以下命令使用 Node 自带的 Corepack 按 package.json 选用 pnpm。在项目目录，以有 sudo 权限的管理员账号执行：
 
 ```sh
