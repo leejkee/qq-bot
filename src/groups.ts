@@ -25,6 +25,9 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
       console.info(JSON.stringify({
         stage: 'qq_group_event_probe', event_type: type, message_tag: messageTag,
         has_mentions: Array.isArray(data.mentions), mention_count: mentions.length, mentions_self_by_id: mentionsSelf,
+        mention_is_you: mentions.map(value =>
+          value && typeof value === 'object' && 'is_you' in value && typeof value.is_you === 'boolean'
+            ? value.is_you : null),
         has_reference: Boolean(data.message_reference), has_scene_ext: Array.isArray(data.message_scene?.ext),
         has_elements: Array.isArray(data.msg_elements), has_attachments: Boolean(data.attachments?.length)
       }));

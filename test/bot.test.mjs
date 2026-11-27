@@ -117,8 +117,8 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   assert.equal((await post(at('bad','bad'),false)).status,401);
   for(const packet of [
     {...at('normal','M0-001'),t:'GROUP_MESSAGE_CREATE'},
-    {...at('other','<@!other> hi',{mentions:[{id:'other'}]}),t:'GROUP_MESSAGE_CREATE'},
-    {...at('same','<@!self> slow',{mentions:[{id:'self'}]}),t:'GROUP_MESSAGE_CREATE'},
+    {...at('other','<@!other> hi',{mentions:[{id:'other',is_you:false}]}),t:'GROUP_MESSAGE_CREATE'},
+    {...at('same','<@!self> slow',{mentions:[{id:'group-scoped',is_you:true},{id:'unknown'}]}),t:'GROUP_MESSAGE_CREATE'},
     {...at('dm','dm'),t:'C2C_MESSAGE_CREATE'},at('self','self',{author:{id:'self'}}),
     at('blank','<@!self>  ',{attachments:[{content_type:'image/jpeg'}]})]) {
     assert.equal((await post(packet)).status,200);
@@ -136,8 +136,9 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const observations = () => logs.filter(log => log.stage === 'qq_group_event_probe');
   const ordinary = observations().filter(log => log.event_type === 'GROUP_MESSAGE_CREATE');
   assert.deepEqual(ordinary.map(log => [log.has_mentions,log.mentions_self_by_id]), [
-    [false,false], [true,false], [true,true]
+    [false,false], [true,false], [true,false]
   ]);
+  assert.deepEqual(ordinary.map(log => log.mention_is_you), [[], [false], [true, null]]);
   assert.equal(observations().length,5);
   const first=at('same','<@!self> slow',{message_reference:{content:'history'},attachments:[{filename:'ignore'}]});
   assert.equal((await post(first)).status,200);
