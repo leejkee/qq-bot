@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {loadConfig, readConfig} from '../src/config.ts';
+import {readConfig} from '../src/config.ts';
 import {createGroupBot} from '../src/groups.ts';
 import {createCompletion} from '../src/llm.ts';
 import {createGroupConversation} from '../src/conversation.ts';
@@ -15,17 +15,23 @@ const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
   LLM_CHAT_URL: 'https://example.invalid/chat', LLM_API_KEY: 'fixture', LLM_MODEL: 'test-model'};
 const config = readConfig(env);
 
-test('foreground probe requires its server env file and validates production paths', t => {
+test('probe reads project .env while release relies on the service environment', t => {
   const directory = mkdtempSync(join(tmpdir(), 'qq-bot-probe-'));
   t.after(() => rmSync(directory, {recursive: true, force: true}));
   const path = join(directory, '.env');
-  assert.throws(() => loadConfig(path), /前台调试配置/);
-  assert.throws(() => loadConfig(directory), /前台调试配置/);
-  const settings = {...env, QQBOT_CONFIG_DIR: directory, QQBOT_DATA_DIR: directory, QQBOT_LOG_DIR: directory};
+  const settings = {...env, LLM_SYSTEM_PROMPT_FILE: 'missing-prompt'};
   writeFileSync(path, Object.entries(settings).map(([key, value]) => key + '=' + value).join('\n'));
-  assert.deepEqual(loadConfig(path), readConfig({...settings, NODE_ENV: 'production'}));
-  writeFileSync(path, '\nQQBOT_CONFIG_DIR=./config\n', {flag: 'a'});
-  assert.throws(() => loadConfig(path), /QQBOT_CONFIG_DIR/);
+  const entry = join(process.cwd(), 'src/index.ts');
+  const args = ['--import', import.meta.resolve('tsx'), entry];
+  const run = (argv, variables) => spawnSync(process.execPath, argv, {
+    cwd: directory, env: {PATH: process.env.PATH, ...variables}, encoding: 'utf8'
+  });
+  const probe = run(['--env-file=.env', ...args, '--console-probe'], {});
+  assert.equal(probe.status, 78);
+  assert.match(probe.stderr, /无法读取 LLM_SYSTEM_PROMPT_FILE/);
+  const release = run(args, {NODE_ENV: 'production'});
+  assert.equal(release.status, 78);
+  assert.match(release.stderr, /缺少 BOT_APPID/);
 });
 
 test('config validation and restart with a changed model', () => {

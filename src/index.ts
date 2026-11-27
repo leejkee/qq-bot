@@ -1,11 +1,11 @@
-import {loadConfig} from './config.js';
+import {readConfig} from './config.js';
 import {createGroupBot} from './groups.js';
 import {createCompletion} from './llm.js';
 import {createGroupConversation} from './conversation.js';
 
 const consoleProbe = process.argv.slice(2).includes('--console-probe');
 function load() {
-  try { return loadConfig(consoleProbe ? '/etc/qq-bot/.env' : undefined); }
+  try { return readConfig({...process.env, NODE_ENV: consoleProbe ? 'development' : process.env.NODE_ENV ?? 'production'}); }
   catch (error) {
     console.error(error instanceof Error ? error.message : '配置无效');
     process.exit(78);

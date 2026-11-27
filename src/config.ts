@@ -1,27 +1,6 @@
 import {isAbsolute, resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
-import {parseEnv} from 'node:util';
 import {isDeepSeekChatEndpoint} from './llm.js';
-
-export function loadConfig(probeEnvFile?: string) {
-  if (probeEnvFile) {
-    let settings: NodeJS.ProcessEnv;
-    try {
-      settings = parseEnv(readFileSync(probeEnvFile, 'utf8'));
-    } catch {
-      throw new Error('无法读取前台调试配置 ' + probeEnvFile + '，请确认文件存在且启动账号有读取权限');
-    }
-    return readConfig({...settings, NODE_ENV: 'production'});
-  }
-  if ((process.env.NODE_ENV ?? 'development') === 'development') {
-    try {
-      process.loadEnvFile('.env');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法加载开发环境 .env');
-    }
-  }
-  return readConfig(process.env);
-}
 
 export function readConfig(env: NodeJS.ProcessEnv) {
   const keys = ['BOT_APPID', 'BOT_SECRET', 'BOT_SANDBOX', 'LLM_CHAT_URL', 'LLM_API_KEY', 'LLM_MODEL'] as const;

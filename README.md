@@ -13,7 +13,11 @@ pnpm test
 pnpm build
 ```
 
-本地将 `.env.example` 复制为 `.env`，填入开发用凭据，再运行 `pnpm dev`。开发启动使用 Node.js 内置 dotenv 加载项目目录的配置，已有进程环境变量优先。测试通过模拟配置和回环 Webhook 运行。
+## 前台开发和调试
+
+在本机或服务器的项目根目录准备 `.env`，安装依赖后运行 `pnpm dev`。Node.js 从当前目录加载配置，已有进程环境变量优先。开发命令直接运行 TypeScript，输出 Webhook 事件，修改源码会自动重启。修改 `.env` 后重新启动命令。
+
+需要断点时使用 `pnpm debug`，调试器默认监听回环地址 9229。只需单次前台观测时使用 `pnpm probe`。三个入口均使用项目目录的 `.env`，按 Ctrl+C 退出。服务器调试前确认 Webhook 端口 3000 空闲。
 
 ## 部署到 Debian VPS
 
@@ -22,8 +26,6 @@ pnpm build
 用 `bash deploy/start.sh status` 查看服务状态，用 `bash deploy/start.sh logs` 查看近期 journal。启动就绪事件为 `qq_webhook_ready`。按 `request_id` 跟踪群消息处理。发送诊断包括消息序号、长度、换行和 @ 标记，API 失败时记录 HTTP 状态、QQ 错误码及追踪 ID。
 
 [部署与验收步骤](docs/deployment.md)
-
-服务器前台调试使用 `pnpm probe`（先运行 `pnpm build`）。该入口直接从 `/etc/qq-bot/.env` 读取业务配置，并按生产环境校验目录。启动账号需要已有的文件读取权限，端口 3000 需空闲。文件不可读时程序会在连接 QQ 前退出。
 
 ## 系统提示词
 
