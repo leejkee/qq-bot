@@ -5,7 +5,8 @@ import {setImmediate as nextTurn} from 'node:timers/promises';
 import {spawnSync} from 'node:child_process';
 import {readConfig} from '../src/config.ts';
 import {createGroupBot} from '../src/groups.ts';
-import {createAnswer} from '../src/llm.ts';
+import {createCompletion} from '../src/llm.ts';
+import {createGroupConversation} from '../src/conversation.ts';
 
 const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
   LLM_CHAT_URL: 'https://example.invalid/chat', LLM_API_KEY: 'fixture', LLM_MODEL: 'test-model'};
@@ -26,7 +27,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const requests = [], sends = [], logs = [];
   t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
   const slow = Promise.withResolvers();
-  const answer = createAnswer(config.llm, async (_url, options) => {
+  const complete = createCompletion(config.llm, async (_url, options) => {
     const body = JSON.parse(options.body);
     requests.push(body);
     const question = body.messages[0].content;
@@ -35,7 +36,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
     if (question === 'error') return new Response(null, {status: 503});
     return Response.json({choices: [{message: {content: question === 'empty' ? '  ' : '<image> '+question}}]});
   });
-  const bot = createGroupBot(config, answer);
+  const bot = createGroupBot(config, createGroupConversation(complete));
   bot.self_id = 'self';
   bot.request.defaults.adapter = async req => {
     sends.push({url:req.url, data: JSON.parse(req.data)});
@@ -114,7 +115,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));
 });
 
-test('DeepSeek search is opt-in and the provider runs it in a single request', async t => {
+test('DeepSeek deep search is opt-in and the provider runs it in a single request', async t => {
   assert.throws(() => readConfig({...env, LLM_WEB_SEARCH: 'yes'}), /LLM_WEB_SEARCH/);
   assert.throws(() => readConfig({...env, LLM_WEB_SEARCH: 'true'}), /DeepSeek/);
   assert.equal(readConfig(env).llm.webSearch, false);
@@ -123,18 +124,46 @@ test('DeepSeek search is opt-in and the provider runs it in a single request', a
   const logs = [];
   t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
   let requests = 0;
-  const answer = createAnswer(settings, async (url, options) => {
+  const complete = createCompletion(settings, async (url, options) => {
     requests++;
     assert.equal(url, settings.url);
     assert.deepEqual(JSON.parse(options.body), {
       model: 'deepseek-flash', stream: false, messages: [{role: 'user', content: '最近更新了什么？'}],
-      tools: [{type: 'deepseek_web_search'}], thinking: {type: 'disabled'}
+      tools: [{type: 'deepseek_web_search'}], thinking: {type: 'enabled'}
     });
     return Response.json({choices: [{message: {content: '更新摘要', server_tool_calls: [
       {calls: [{type: 'deepseek_web_search', status: 'completed'}]}
     ]}}]});
   });
-  assert.equal(await answer('最近更新了什么？'), '更新摘要');
+  assert.equal(await complete([{role: 'user', content: '最近更新了什么？'}]), '更新摘要');
   assert.equal(requests, 1);
   assert.deepEqual(logs, [{stage: 'llm_web_search_completed'}]);
+});
+
+test('DeepSeek enables link reading only for requests with a link in the current question', async () => {
+  const settings = {
+    ...config.llm, model: 'deepseek-flash', url: 'https://api.deepseek.com/chat/completions', webSearch: true
+  };
+  const bodies = [];
+  const request = async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return Response.json({choices: [{message: {content: '回答'}}]});
+  };
+  const complete = createCompletion(settings, request);
+  const link = {role: 'user', content: '请总结这个网页：HTTPS://example.com/article。'};
+  const question = {role: 'user', content: 'HTTP 和 HTTPS 有什么区别？'};
+  await complete([link]);
+  await complete([link, {role: 'assistant', content: '网页摘要'}, question]);
+  await createCompletion({...settings, webSearch: false}, request)([link]);
+  await createCompletion({...settings, url: config.llm.url, webSearch: false}, request)([link]);
+
+  const search = {type: 'deepseek_web_search'};
+  const readUrl = {type: 'deepseek_read_url'};
+  assert.deepEqual(bodies.map(({tools, thinking}) => [tools, thinking?.type]), [
+    [[search, readUrl], 'disabled'],
+    [[search], 'enabled'],
+    [[readUrl], 'disabled'],
+    [undefined, undefined]
+  ]);
+  assert.deepEqual(bodies[0].messages, [link]);
 });

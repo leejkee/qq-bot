@@ -1,6 +1,6 @@
 import { Bot, ReceiverMode, type DataPacket, type GroupMessageEvent } from 'qq-official-bot';
 import type { Config } from './config.js';
-import { ModelHttpError } from './llm.js';
+import type { GroupConversation } from './conversation.js';
 import { randomUUID } from 'node:crypto';
 
 export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
@@ -20,7 +20,7 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
   }
 }
 
-export function createGroupBot(config: Config, answer: (question: string) => Promise<string>) {
+export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbox'>, answer: GroupConversation) {
   const bot = new GroupBot({
     appid: config.appid, secret: config.secret, sandbox: config.sandbox, removeAt: true,
     intents: ['GROUP_AND_C2C_EVENT'], mode: ReceiverMode.WEBHOOK, port: 3000, path: '/qq/callback',
@@ -96,17 +96,13 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     }
     const modelStarted = Date.now();
     let text: string;
-    try {
-      text = await answer(question);
+    const result = await answer(question);
+    if (result.ok) {
+      text = result.text;
       logStage('model_answered', modelStarted);
-    } catch (error) {
-      const reason = error instanceof ModelHttpError ? 'http_error'
-        : error instanceof Error && error.name === 'TimeoutError' ? 'timeout'
-        : error instanceof SyntaxError ? 'invalid_json'
-        : error instanceof Error && error.message === 'empty model answer' ? 'empty_answer'
-        : 'request_failed';
+    } else {
       logStage('model_failed', modelStarted, {
-        reason, status: error instanceof ModelHttpError ? error.status : undefined
+        reason: result.reason, status: result.status
       });
       text = '暂时无法回答，请稍后重新 @ 我。';
     }
