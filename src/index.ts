@@ -3,8 +3,9 @@ import {createGroupBot} from './groups.js';
 import {createCompletion} from './llm.js';
 import {createGroupConversation} from './conversation.js';
 
+const consoleProbe = process.argv.slice(2).includes('--console-probe');
 function load() {
-  try { return loadConfig(); }
+  try { return loadConfig(consoleProbe ? '/etc/qq-bot/.env' : undefined); }
   catch (error) {
     console.error(error instanceof Error ? error.message : '配置无效');
     process.exit(78);
@@ -12,7 +13,6 @@ function load() {
 }
 const config = load();
 const conversation = createGroupConversation(createCompletion(config.llm), config.llm.systemPrompt);
-const consoleProbe = process.argv.slice(2).includes('--console-probe');
 const bot = createGroupBot({...config, consoleProbe}, conversation);
 try {
   // Await the SDK operations directly: its Session.start does not propagate async token/port failures.

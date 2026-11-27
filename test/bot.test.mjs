@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {readConfig} from '../src/config.ts';
+import {loadConfig, readConfig} from '../src/config.ts';
 import {createGroupBot} from '../src/groups.ts';
 import {createCompletion} from '../src/llm.ts';
 import {createGroupConversation} from '../src/conversation.ts';
@@ -14,6 +14,19 @@ import {createGroupConversation} from '../src/conversation.ts';
 const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
   LLM_CHAT_URL: 'https://example.invalid/chat', LLM_API_KEY: 'fixture', LLM_MODEL: 'test-model'};
 const config = readConfig(env);
+
+test('foreground probe requires its server env file and validates production paths', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'qq-bot-probe-'));
+  t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const path = join(directory, '.env');
+  assert.throws(() => loadConfig(path), /前台调试配置/);
+  assert.throws(() => loadConfig(directory), /前台调试配置/);
+  const settings = {...env, QQBOT_CONFIG_DIR: directory, QQBOT_DATA_DIR: directory, QQBOT_LOG_DIR: directory};
+  writeFileSync(path, Object.entries(settings).map(([key, value]) => key + '=' + value).join('\n'));
+  assert.deepEqual(loadConfig(path), readConfig({...settings, NODE_ENV: 'production'}));
+  writeFileSync(path, '\nQQBOT_CONFIG_DIR=./config\n', {flag: 'a'});
+  assert.throws(() => loadConfig(path), /QQBOT_CONFIG_DIR/);
+});
 
 test('config validation and restart with a changed model', () => {
   assert.equal(config.eventProbe, false);

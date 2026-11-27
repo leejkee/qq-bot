@@ -23,6 +23,8 @@ pnpm build
 
 [部署与验收步骤](docs/deployment.md)
 
+服务器前台调试使用 `pnpm probe`（先运行 `pnpm build`）。该入口直接从 `/etc/qq-bot/.env` 读取业务配置，并按生产环境校验目录。启动账号需要已有的文件读取权限，端口 3000 需空闲。文件不可读时程序会在连接 QQ 前退出。
+
 ## 系统提示词
 
 将多行提示词写入 UTF-8 文本文件，在 `.env` 中设置 `LLM_SYSTEM_PROMPT_FILE`。例如本地使用 `LLM_SYSTEM_PROMPT_FILE=system-prompt.txt`，默认读取 `./config/system-prompt.txt`。相对路径从 `QQBOT_CONFIG_DIR` 解析，也可填写绝对路径。
