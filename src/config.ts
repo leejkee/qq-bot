@@ -1,4 +1,5 @@
 import {isAbsolute, resolve} from 'node:path';
+import {isDeepSeekChatEndpoint} from './llm.js';
 
 export function loadConfig() {
   if ((process.env.NODE_ENV ?? 'development') === 'development') {
@@ -20,8 +21,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   if (!['true', 'false'].includes(env.BOT_SANDBOX!)) throw new Error('BOT_SANDBOX 需要 true 或 false');
   const search = env.LLM_WEB_SEARCH?.trim() ?? 'false';
   if (search !== 'true' && search !== 'false') throw new Error('LLM_WEB_SEARCH 需要 true 或 false');
-  if (search === 'true' &&
-      (url.origin !== 'https://api.deepseek.com' || !['/chat/completions', '/v1/chat/completions'].includes(url.pathname))) {
+  if (search === 'true' && !isDeepSeekChatEndpoint(url)) {
     throw new Error('LLM_WEB_SEARCH 需要 DeepSeek 官方 Chat Completions 地址');
   }
   const mode = env.NODE_ENV ?? 'development';

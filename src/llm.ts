@@ -2,11 +2,28 @@ import {AnswerError, type ChatMessage} from './conversation.js';
 
 type ModelConfig = {url: string; key: string; model: string; webSearch: boolean};
 
+export function isDeepSeekChatEndpoint(url: URL) {
+  return url.origin === 'https://api.deepseek.com' &&
+    ['/chat/completions', '/v1/chat/completions'].includes(url.pathname);
+}
+
+function containsWebLink(message: ChatMessage | undefined) {
+  if (message?.role !== 'user') return false;
+  const links = message.content.match(/\bhttps?:\/\/[^\s<>"“”‘’`，。！？；、]+/gi);
+  return links?.some(link => URL.canParse(link)) ?? false;
+}
+
 export function createCompletion(config: ModelConfig, request = fetch) {
+  const endpoint = URL.parse(config.url);
+  const supportsReadUrl = config.model === 'deepseek-flash' && endpoint !== null && isDeepSeekChatEndpoint(endpoint);
   return async (messages: readonly ChatMessage[]): Promise<string> => {
-    const webTools = config.webSearch ? {
-      tools: [{type: 'deepseek_web_search'}],
-      thinking: {type: 'disabled'}
+    const readUrl = supportsReadUrl && containsWebLink(messages.at(-1));
+    const tools = [];
+    if (config.webSearch) tools.push({type: 'deepseek_web_search'});
+    if (readUrl) tools.push({type: 'deepseek_read_url'});
+    // DeepSeek skips standalone link reading when thinking and search are both enabled.
+    const webTools = tools.length ? {
+      tools, thinking: {type: readUrl ? 'disabled' : 'enabled'}
     } : {};
     const response = await request(config.url, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60_000),
