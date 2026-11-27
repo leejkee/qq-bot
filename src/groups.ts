@@ -1,13 +1,34 @@
 import { Bot, ReceiverMode, type DataPacket, type GroupMessageEvent } from 'qq-official-bot';
 import type { Config } from './config.js';
 import type { GroupConversation } from './conversation.js';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 
 export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
+  private probeKey?: Buffer;
+  enableEventProbe() {
+    this.probeKey = randomBytes(32);
+  }
   readonly pendingReplies = new Set<Promise<void>>();
   override dispatchEvent(type: string, packet: DataPacket) {
     // SDK 1.2.3 maps both GROUP_MESSAGE_CREATE and GROUP_AT_MESSAGE_CREATE to message.group.
     const data = packet.d;
+    if (this.probeKey && data && (type === 'GROUP_MESSAGE_CREATE' || type === 'GROUP_AT_MESSAGE_CREATE')) {
+      const group = data.group_openid || data.group_id;
+      const messageTag = typeof group === 'string' && typeof data.id === 'string'
+        ? createHmac('sha256', this.probeKey).update(JSON.stringify([group, data.id])).digest('hex').slice(0, 24)
+        : undefined;
+      const mentions: unknown[] = Array.isArray(data.mentions) ? data.mentions : [];
+      const mentionsSelf = mentions.some(value => {
+        if (!value || typeof value !== 'object' || !('id' in value)) return false;
+        return Boolean(value.id && (value.id === this.self_id || value.id === this.config.appid));
+      });
+      console.info(JSON.stringify({
+        stage: 'qq_group_event_probe', event_type: type, message_tag: messageTag,
+        has_mentions: Array.isArray(data.mentions), mention_count: mentions.length, mentions_self_by_id: mentionsSelf,
+        has_reference: Boolean(data.message_reference), has_scene_ext: Array.isArray(data.message_scene?.ext),
+        has_elements: Array.isArray(data.msg_elements), has_attachments: Boolean(data.attachments?.length)
+      }));
+    }
     if (type !== 'GROUP_AT_MESSAGE_CREATE' || !data || typeof data.content !== 'string') return;
     const author = data.author;
     if (!author || author.bot || [author.id, author.member_openid].some(id => id && (id === this.self_id || id === this.config.appid))) return;
@@ -20,12 +41,13 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
   }
 }
 
-export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbox'>, answer: GroupConversation) {
+export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbox'> & {eventProbe?: boolean}, answer: GroupConversation) {
   const bot = new GroupBot({
     appid: config.appid, secret: config.secret, sandbox: config.sandbox, removeAt: true,
     intents: ['GROUP_AND_C2C_EVENT'], mode: ReceiverMode.WEBHOOK, port: 3000, path: '/qq/callback',
     logLevel: 'off'
   });
+  if (config.eventProbe) bot.enableEventProbe();
   bot.request.interceptors.request.use(request => {
     if (request.method !== 'post' || !/^\/v2\/groups\/[^/]+\/messages$/.test(request.url ?? '')) {
       return request;
@@ -109,7 +131,10 @@ export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbo
     const sending = Date.now();
     try {
       // Send the answer as plain text with its own passive reply sequence.
-      await reply(text, 2);
+      const receipt = await reply(text, 2);
+      if (config.eventProbe) logStage('qq_reply_receipt_probe', sending, {
+        has_message_id: typeof receipt.data?.id === 'string' && receipt.data.id.length > 0
+      });
       logStage('qq_replied', sending);
     } catch (error) {
       const code = error instanceof Error && error.message.match(/failed with code\((\d+)\)/);

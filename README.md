@@ -1,6 +1,6 @@
 # QQ 群单轮问答机器人
 
-群成员用 QQ 客户端真正 @ 机器人并输入文字，机器人调用一次模型，把纯文本答案回复到原群的原消息。每条请求只携带当前问题。同群、同消息 ID 在一个进程内去重 10 分钟，重启后清空。模型失败会回复一次简短提示，QQ 发送失败只记录阶段。服务独立运行，无需启动 newsbrief。
+群成员用 QQ 客户端真正 @ 机器人并输入文字，机器人调用一次模型，把纯文本答案回复到原群的原消息。每条请求携带当前问题和可选的系统提示词。同群、同消息 ID 在一个进程内去重 10 分钟，重启后清空。模型失败会回复一次简短提示，QQ 发送失败只记录阶段。服务独立运行，无需启动 newsbrief。
 
 ## 本地构建
 
@@ -22,6 +22,12 @@ pnpm build
 用 `bash deploy/start.sh status` 查看服务状态，用 `bash deploy/start.sh logs` 查看近期 journal。启动就绪事件为 `qq_webhook_ready`。按 `request_id` 跟踪群消息处理。发送诊断包括消息序号、长度、换行和 @ 标记，API 失败时记录 HTTP 状态、QQ 错误码及追踪 ID。
 
 [部署与验收步骤](docs/deployment.md)
+
+## 系统提示词
+
+将多行提示词写入 UTF-8 文本文件，在 `.env` 中设置 `LLM_SYSTEM_PROMPT_FILE`。例如本地使用 `LLM_SYSTEM_PROMPT_FILE=system-prompt.txt`，默认读取 `./config/system-prompt.txt`。相对路径从 `QQBOT_CONFIG_DIR` 解析，也可填写绝对路径。
+
+生产环境使用 `qq-bot-runtime` 可读取的独立文本文件，例如由管理员管理的 `/etc/qq-bot-prompts/system-prompt.txt`。API 密钥继续放在 root 专用的 `/etc/qq-bot/.env`。修改提示词后重启服务。省略变量即可使用普通单轮问答。明确配置的文件不可读或为空时，服务会在启动时报告配置错误。
 
 ## DeepSeek 联网搜索
 

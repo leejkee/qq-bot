@@ -11,7 +11,7 @@ function load() {
   }
 }
 const config = load();
-const conversation = createGroupConversation(createCompletion(config.llm));
+const conversation = createGroupConversation(createCompletion(config.llm), config.llm.systemPrompt);
 const bot = createGroupBot(config, conversation);
 try {
   // Await the SDK operations directly: its Session.start does not propagate async token/port failures.

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {createPrivateKey, sign, verify, createPublicKey} from 'node:crypto';
 import {setImmediate as nextTurn} from 'node:timers/promises';
 import {spawnSync} from 'node:child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {readConfig} from '../src/config.ts';
 import {createGroupBot} from '../src/groups.ts';
 import {createCompletion} from '../src/llm.ts';
@@ -13,6 +16,8 @@ const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
 const config = readConfig(env);
 
 test('config validation and restart with a changed model', () => {
+  assert.equal(config.eventProbe, false);
+  assert.throws(() => readConfig({...env, QQBOT_EVENT_PROBE: '1'}), /QQBOT_EVENT_PROBE/);
   const failed = spawnSync(process.execPath, ['--import','tsx','src/index.ts'], {env: {PATH: process.env.PATH, NODE_ENV: 'test'}, encoding: 'utf8'});
   assert.equal(failed.status, 78);
   assert.match(failed.stderr, /BOT_APPID/);
@@ -21,6 +26,29 @@ test('config validation and restart with a changed model', () => {
   assert.throws(() => readConfig({...env,BOT_SANDBOX:'0'}), /BOT_SANDBOX/);
   assert.throws(() => readConfig({...env,LLM_CHAT_URL:'http://example.org'}), /LLM_CHAT_URL/);
   assert.equal(readConfig({...env,BOT_SANDBOX:'false',LLM_MODEL:'another'}).llm.model,'another');
+});
+
+test('a configured prompt file becomes a system message before the current question', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'qq-bot-prompt-'));
+  t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const prompt = '请直接回答问题。\n需要时注明来源。';
+  const filename = 'system-prompt.txt';
+  const path = join(directory, filename);
+  const settings = {...env, QQBOT_CONFIG_DIR: directory, LLM_SYSTEM_PROMPT_FILE: filename};
+  assert.throws(() => readConfig(settings), /无法读取 LLM_SYSTEM_PROMPT_FILE/);
+  writeFileSync(path, '  \n', 'utf8');
+  assert.throws(() => readConfig(settings), /文件为空/);
+  writeFileSync(path, prompt + '\n', 'utf8');
+  const {llm} = readConfig(settings);
+  assert.equal(readConfig({...settings, LLM_SYSTEM_PROMPT_FILE: path}).llm.systemPrompt, prompt);
+  const complete = createCompletion(llm, async (_url, options) => {
+    assert.deepEqual(JSON.parse(options.body).messages, [
+      {role: 'system', content: prompt},
+      {role: 'user', content: '你好'}
+    ]);
+    return Response.json({choices: [{message: {content: '你好！'}}]});
+  });
+  assert.deepEqual(await createGroupConversation(complete, llm.systemPrompt)('你好'), {ok: true, text: '你好！'});
 });
 
 test('signed webhook, independent questions, slow responses, redelivery and send failures', async t => {
@@ -36,7 +64,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
     if (question === 'error') return new Response(null, {status: 503});
     return Response.json({choices: [{message: {content: question === 'empty' ? '  ' : '<image> '+question}}]});
   });
-  const bot = createGroupBot(config, createGroupConversation(complete));
+  const bot = createGroupBot(readConfig({...env, QQBOT_EVENT_PROBE: 'true'}), createGroupConversation(complete));
   bot.self_id = 'self';
   bot.request.defaults.adapter = async req => {
     sends.push({url:req.url, data: JSON.parse(req.data)});
@@ -69,19 +97,34 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   assert.ok(verify(null,Buffer.from('123check'),createPublicKey(key),Buffer.from(result.signature,'hex')));
   assert.equal((await post(at('bad','bad'),false)).status,401);
   for(const packet of [
-    {...at('normal','机器人昵称'),t:'GROUP_MESSAGE_CREATE'}, {...at('other','<@!other> hi'),t:'GROUP_MESSAGE_CREATE'},
+    {...at('normal','机器人昵称'),t:'GROUP_MESSAGE_CREATE'},
+    {...at('other','<@!other> hi',{mentions:[{id:'other'}]}),t:'GROUP_MESSAGE_CREATE'},
+    {...at('same','<@!self> slow',{mentions:[{id:'self'}]}),t:'GROUP_MESSAGE_CREATE'},
     {...at('dm','dm'),t:'C2C_MESSAGE_CREATE'},at('self','self',{author:{id:'self'}}),
     at('blank','<@!self>  ',{attachments:[{content_type:'image/jpeg'}]})]) {
     assert.equal((await post(packet)).status,200);
   }
   assert.equal(requests.length,0);
   assert.equal(sends.length,0);
+  const observations = () => logs.filter(log => log.stage === 'qq_group_event_probe');
+  const ordinary = observations().filter(log => log.event_type === 'GROUP_MESSAGE_CREATE');
+  assert.deepEqual(ordinary.map(log => [log.has_mentions,log.mentions_self_by_id]), [
+    [false,false], [true,false], [true,true]
+  ]);
+  assert.equal(observations().length,5);
   const first=at('same','<@!self> slow',{message_reference:{content:'history'},attachments:[{filename:'ignore'}]});
   assert.equal((await post(first)).status,200);
   await post(first);
   assert.equal(requests.length,1);
   assert.equal(sends.length,1);
   await post(at('same','second',{group_openid:'B',author:{member_openid:'another'}}));
+  const events = observations().slice(-3);
+  assert.match(ordinary[2].message_tag, /^[a-f0-9]{24}$/);
+  assert.equal(events[0].message_tag, ordinary[2].message_tag);
+  assert.equal(events[1].message_tag, events[0].message_tag);
+  assert.notEqual(events[2].message_tag, events[0].message_tag);
+  assert.ok(events[0].has_reference && events[0].has_attachments);
+  assert.doesNotMatch(JSON.stringify(observations()), /机器人昵称|<@!|history|member_openid|slow/);
   slow.resolve();
   await nextTurn();
   const feedback = sends.filter(s => s.data.msg_seq === 1);
@@ -106,8 +149,9 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const requestId = logs.find(log => log.stage === 'group_at_received').request_id;
   const tracked = logs.filter(log => log.request_id === requestId);
   assert.deepEqual(tracked.map(log => log.stage), [
-    'group_at_received', 'qq_reply_sending', 'qq_ack_sent', 'model_answered', 'qq_reply_sending', 'qq_replied'
+    'group_at_received', 'qq_reply_sending', 'qq_ack_sent', 'model_answered', 'qq_reply_sending', 'qq_reply_receipt_probe', 'qq_replied'
   ]);
+  assert.equal(tracked.find(log => log.stage === 'qq_reply_receipt_probe').has_message_id, true);
   assert.deepEqual(tracked.filter(log => log.stage === 'qq_reply_sending').map(log => log.msg_seq), [1, 2]);
   assert.ok(tracked.filter(log => log.stage === 'qq_reply_sending').every(log => !log.has_mention_markup));
   assert.ok(sends.filter(s => s.data.msg_seq === 2).slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
