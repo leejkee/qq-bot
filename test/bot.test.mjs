@@ -5,7 +5,8 @@ import {setImmediate as nextTurn} from 'node:timers/promises';
 import {spawnSync} from 'node:child_process';
 import {readConfig} from '../src/config.ts';
 import {createGroupBot} from '../src/groups.ts';
-import {createAnswer} from '../src/llm.ts';
+import {createCompletion} from '../src/llm.ts';
+import {createGroupConversation} from '../src/conversation.ts';
 
 const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
   LLM_CHAT_URL: 'https://example.invalid/chat', LLM_API_KEY: 'fixture', LLM_MODEL: 'test-model'};
@@ -26,7 +27,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const requests = [], sends = [], logs = [];
   t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
   const slow = Promise.withResolvers();
-  const answer = createAnswer(config.llm, async (_url, options) => {
+  const complete = createCompletion(config.llm, async (_url, options) => {
     const body = JSON.parse(options.body);
     requests.push(body);
     const question = body.messages[0].content;
@@ -35,7 +36,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
     if (question === 'error') return new Response(null, {status: 503});
     return Response.json({choices: [{message: {content: question === 'empty' ? '  ' : '<image> '+question}}]});
   });
-  const bot = createGroupBot(config, answer);
+  const bot = createGroupBot(config, createGroupConversation(complete));
   bot.self_id = 'self';
   bot.request.defaults.adapter = async req => {
     sends.push({url:req.url, data: JSON.parse(req.data)});
@@ -123,7 +124,7 @@ test('DeepSeek search is opt-in and the provider runs it in a single request', a
   const logs = [];
   t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
   let requests = 0;
-  const answer = createAnswer(settings, async (url, options) => {
+  const complete = createCompletion(settings, async (url, options) => {
     requests++;
     assert.equal(url, settings.url);
     assert.deepEqual(JSON.parse(options.body), {
@@ -134,7 +135,7 @@ test('DeepSeek search is opt-in and the provider runs it in a single request', a
       {calls: [{type: 'deepseek_web_search', status: 'completed'}]}
     ]}}]});
   });
-  assert.equal(await answer('最近更新了什么？'), '更新摘要');
+  assert.equal(await complete([{role: 'user', content: '最近更新了什么？'}]), '更新摘要');
   assert.equal(requests, 1);
   assert.deepEqual(logs, [{stage: 'llm_web_search_completed'}]);
 });

@@ -1,6 +1,7 @@
 import {loadConfig} from './config.js';
 import {createGroupBot} from './groups.js';
-import {createAnswer} from './llm.js';
+import {createCompletion} from './llm.js';
+import {createGroupConversation} from './conversation.js';
 
 function load() {
   try { return loadConfig(); }
@@ -10,7 +11,8 @@ function load() {
   }
 }
 const config = load();
-const bot = createGroupBot(config, createAnswer(config.llm));
+const conversation = createGroupConversation(createCompletion(config.llm));
+const bot = createGroupBot(config, conversation);
 try {
   // Await the SDK operations directly: its Session.start does not propagate async token/port failures.
   await bot.sessionManager.getAccessToken();
