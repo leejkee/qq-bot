@@ -41,13 +41,27 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
   }
 }
 
-export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbox'> & {eventProbe?: boolean}, answer: GroupConversation) {
+export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbox'> & {eventProbe?: boolean; consoleProbe?: boolean}, answer: GroupConversation) {
   const bot = new GroupBot({
     appid: config.appid, secret: config.secret, sandbox: config.sandbox, removeAt: true,
     intents: ['GROUP_AND_C2C_EVENT'], mode: ReceiverMode.WEBHOOK, port: 3000, path: '/qq/callback',
     logLevel: 'off'
   });
-  if (config.eventProbe) bot.enableEventProbe();
+  if (config.eventProbe || config.consoleProbe) bot.enableEventProbe();
+  if (config.consoleProbe) {
+    bot.receiver.on('packet', (packet: DataPacket) => {
+      const data = packet.d;
+      const content = typeof data?.content === 'string' ? data.content : '';
+      // Only echo deliberate test markers. Other chat text may contain credentials.
+      const marker = content.replace(/<@!?[^<>\s]+>/g, '').trim();
+      console.info(JSON.stringify({
+        timestamp: new Date().toISOString(), stage: 'qq_inbound_event',
+        event_type: packet.t, content_bytes: Buffer.byteLength(content),
+        test_message: /^M0-[0-9]{1,4}$/.test(marker) ? marker : undefined,
+        attachment_count: Array.isArray(data?.attachments) ? data.attachments.length : 0
+      }));
+    });
+  }
   bot.request.interceptors.request.use(request => {
     if (request.method !== 'post' || !/^\/v2\/groups\/[^/]+\/messages$/.test(request.url ?? '')) {
       return request;
@@ -132,7 +146,7 @@ export function createGroupBot(config: Pick<Config, 'appid' | 'secret' | 'sandbo
     try {
       // Send the answer as plain text with its own passive reply sequence.
       const receipt = await reply(text, 2);
-      if (config.eventProbe) logStage('qq_reply_receipt_probe', sending, {
+      if (config.eventProbe || config.consoleProbe) logStage('qq_reply_receipt_probe', sending, {
         has_message_id: typeof receipt.data?.id === 'string' && receipt.data.id.length > 0
       });
       logStage('qq_replied', sending);

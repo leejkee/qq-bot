@@ -64,7 +64,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
     if (question === 'error') return new Response(null, {status: 503});
     return Response.json({choices: [{message: {content: question === 'empty' ? '  ' : '<image> '+question}}]});
   });
-  const bot = createGroupBot(readConfig({...env, QQBOT_EVENT_PROBE: 'true'}), createGroupConversation(complete));
+  const bot = createGroupBot({...config, consoleProbe: true}, createGroupConversation(complete));
   bot.self_id = 'self';
   bot.request.defaults.adapter = async req => {
     sends.push({url:req.url, data: JSON.parse(req.data)});
@@ -97,7 +97,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   assert.ok(verify(null,Buffer.from('123check'),createPublicKey(key),Buffer.from(result.signature,'hex')));
   assert.equal((await post(at('bad','bad'),false)).status,401);
   for(const packet of [
-    {...at('normal','机器人昵称'),t:'GROUP_MESSAGE_CREATE'},
+    {...at('normal','M0-001'),t:'GROUP_MESSAGE_CREATE'},
     {...at('other','<@!other> hi',{mentions:[{id:'other'}]}),t:'GROUP_MESSAGE_CREATE'},
     {...at('same','<@!self> slow',{mentions:[{id:'self'}]}),t:'GROUP_MESSAGE_CREATE'},
     {...at('dm','dm'),t:'C2C_MESSAGE_CREATE'},at('self','self',{author:{id:'self'}}),
@@ -106,6 +106,14 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   }
   assert.equal(requests.length,0);
   assert.equal(sends.length,0);
+  const inbound = logs.filter(log => log.stage === 'qq_inbound_event');
+  assert.deepEqual(inbound.map(log => log.event_type), [
+    'GROUP_MESSAGE_CREATE', 'GROUP_MESSAGE_CREATE', 'GROUP_MESSAGE_CREATE',
+    'C2C_MESSAGE_CREATE', 'GROUP_AT_MESSAGE_CREATE', 'GROUP_AT_MESSAGE_CREATE'
+  ]);
+  assert.deepEqual(inbound.flatMap(log => log.test_message ?? []), ['M0-001']);
+  assert.equal(inbound.at(-1).attachment_count, 1);
+  assert.doesNotMatch(JSON.stringify(inbound), /<@!|member_openid|slow/);
   const observations = () => logs.filter(log => log.stage === 'qq_group_event_probe');
   const ordinary = observations().filter(log => log.event_type === 'GROUP_MESSAGE_CREATE');
   assert.deepEqual(ordinary.map(log => [log.has_mentions,log.mentions_self_by_id]), [

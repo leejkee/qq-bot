@@ -12,13 +12,14 @@ function load() {
 }
 const config = load();
 const conversation = createGroupConversation(createCompletion(config.llm), config.llm.systemPrompt);
-const bot = createGroupBot(config, conversation);
+const consoleProbe = process.argv.slice(2).includes('--console-probe');
+const bot = createGroupBot({...config, consoleProbe}, conversation);
 try {
   // Await the SDK operations directly: its Session.start does not propagate async token/port failures.
   await bot.sessionManager.getAccessToken();
   bot.self_id = (await bot.getSelfInfo()).id;
   await bot.receiver.start(bot.sessionManager);
-  process.once('SIGTERM', async () => {
+  const shutdown = async () => {
     try {
       await bot.receiver.stop(bot.sessionManager);
       await Promise.allSettled(bot.pendingReplies);
@@ -27,7 +28,9 @@ try {
       console.error('qq_shutdown_failed');
       process.exit(1);
     }
-  });
+  };
+  process.once('SIGTERM', shutdown);
+  if (consoleProbe) process.once('SIGINT', shutdown);
   console.info('qq_webhook_ready');
 } catch {
   console.error('qq_start_failed');
