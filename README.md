@@ -27,7 +27,7 @@ pnpm build
 
 在运行配置中设置 `LLM_WEB_SEARCH=true`，使用 DeepSeek 官方 Chat Completions 地址和支持联网搜索的模型。官方示例使用 `LLM_CHAT_URL=https://api.deepseek.com/chat/completions` 与 `LLM_MODEL=deepseek-flash`。模型名仍由 `LLM_MODEL` 指定。配置生效需要重启机器人。
 
-开启后，每条群 @ 依旧独立请求。DeepSeek 根据问题决定是否搜索，应用等待完整回复，超时上限为 45 秒。看到 `llm_web_search_completed` 表示 DeepSeek 报告完成了一次搜索；群中发送回答正文。设为 `false` 或省略该变量可继续使用普通问答，兼容其他模型供应商。
+开启后，每条群 @ 依旧独立请求。DeepSeek 根据问题决定是否搜索，应用等待完整回复。普通问答和联网搜索的模型请求超时均为 60 秒。看到 `llm_web_search_completed` 表示 DeepSeek 报告完成了一次搜索；群中发送回答正文。设为 `false` 或省略该变量可继续使用普通问答，兼容其他模型供应商。
 
 [DeepSeek Web Tools 文档](https://api-docs.deepseek.com/guides/web_tools/)
 

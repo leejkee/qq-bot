@@ -9,7 +9,7 @@ export function createCompletion(config: ModelConfig, request = fetch) {
       thinking: {type: 'disabled'}
     } : {};
     const response = await request(config.url, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(config.webSearch ? 45_000 : 20_000),
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60_000),
       headers: {authorization: 'Bearer ' + config.key, 'content-type': 'application/json'},
       body: JSON.stringify({model: config.model, stream: false, messages, ...webTools})
     });
