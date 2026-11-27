@@ -1,0 +1,29 @@
+[Unit]
+Description=QQ group single-turn bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qq-bot-runtime
+Group=qq-bot-runtime
+WorkingDirectory=/opt/qq-bot
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/qq-bot/.env
+ExecStart=/usr/bin/node /opt/qq-bot/dist/index.js
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=qq-bot
+StateDirectoryMode=0750
+LogsDirectory=qq-bot
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

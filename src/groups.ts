@@ -1,8 +1,10 @@
 import { Bot, ReceiverMode, type DataPacket, type GroupMessageEvent } from 'qq-official-bot';
 import type { Config } from './config.js';
 import { ModelHttpError } from './llm.js';
+import { randomUUID } from 'node:crypto';
 
 export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
+  readonly pendingReplies = new Set<Promise<void>>();
   override dispatchEvent(type: string, packet: DataPacket) {
     // SDK 1.2.3 maps both GROUP_MESSAGE_CREATE and GROUP_AT_MESSAGE_CREATE to message.group.
     const data = packet.d;
@@ -16,10 +18,6 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
     if (!content) return;
     super.dispatchEvent(type, {...packet, d: {id: data.id, group_id: group, content, author, timestamp: data.timestamp, mentions: []}});
   }
-}
-
-function logStage(stage: string, started: number, status?: number) {
-  console.info(JSON.stringify({stage, elapsed_ms: Date.now() - started, status}));
 }
 
 export function createGroupBot(config: Config, answer: (question: string) => Promise<string>) {
@@ -50,6 +48,7 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
           [/msg_id|event_id|msg_seq/i, 'reply_reference']
         ] as const;
         console.info(JSON.stringify({
+          timestamp: new Date().toISOString(),
           stage: 'qq_reply_api_error', http_status: status,
           qq_code: typeof data?.code === 'number' ? data.code : undefined,
           trace_id: typeof trace === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(trace) ? trace : undefined,
@@ -62,7 +61,7 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     return request;
   });
   const seen = new Set<string>();
-  bot.on('message.group', async (event: GroupMessageEvent) => {
+  async function handleMessage(event: GroupMessageEvent) {
     const segments = Array.isArray(event.message) ? event.message : [event.message];
     const question = segments.map(s => typeof s === 'object' && s.type === 'text' ? s.data.text : '').join('').trim();
     if (!question) return;
@@ -71,22 +70,44 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
     seen.add(key);
     setTimeout(() => seen.delete(key), 600_000).unref();
     const started = Date.now();
-    logStage('group_at_received', started);
-    const reply = (content: string, sequence: number) => bot.request.post(
-      `/v2/groups/${encodeURIComponent(event.group_id)}/messages`,
-      {content, msg_type: 0, msg_id: event.message_id, msg_seq: sequence}
-    );
+    const requestId = randomUUID();
+    const logStage = (stage: string, since: number, details: Record<string, unknown> = {}) => {
+      console.info(JSON.stringify({
+        timestamp: new Date().toISOString(), stage, request_id: requestId,
+        elapsed_ms: Date.now() - since, ...details
+      }));
+    };
+    logStage('group_at_received', started, {question_bytes: Buffer.byteLength(question)});
+    const reply = (content: string, sequence: number) => {
+      const body = {content, msg_type: 0, msg_id: event.message_id, msg_seq: sequence};
+      logStage('qq_reply_sending', started, {
+        msg_type: body.msg_type, msg_seq: body.msg_seq, has_msg_id: Boolean(body.msg_id),
+        content_bytes: Buffer.byteLength(content), has_newlines: /[\r\n]/.test(content),
+        has_mention_markup: /<qqbot-at-|<@/i.test(content)
+      });
+      return bot.request.post(`/v2/groups/${encodeURIComponent(event.group_id)}/messages`, body);
+    };
+    const ackStarted = Date.now();
     try {
       await reply('正在烧脑中，请稍后...', 1);
+      logStage('qq_ack_sent', ackStarted);
     } catch {
-      logStage('qq_ack_failed', started);
+      logStage('qq_ack_failed', ackStarted);
     }
+    const modelStarted = Date.now();
     let text: string;
     try {
       text = await answer(question);
-      logStage('model_answered', started);
+      logStage('model_answered', modelStarted);
     } catch (error) {
-      logStage('model_failed', started, error instanceof ModelHttpError ? error.status : undefined);
+      const reason = error instanceof ModelHttpError ? 'http_error'
+        : error instanceof Error && error.name === 'TimeoutError' ? 'timeout'
+        : error instanceof SyntaxError ? 'invalid_json'
+        : error instanceof Error && error.message === 'empty model answer' ? 'empty_answer'
+        : 'request_failed';
+      logStage('model_failed', modelStarted, {
+        reason, status: error instanceof ModelHttpError ? error.status : undefined
+      });
       text = '暂时无法回答，请稍后重新 @ 我。';
     }
     const sending = Date.now();
@@ -96,7 +117,16 @@ export function createGroupBot(config: Config, answer: (question: string) => Pro
       logStage('qq_replied', sending);
     } catch (error) {
       const code = error instanceof Error && error.message.match(/failed with code\((\d+)\)/);
-      logStage('qq_reply_failed', sending, code ? Number(code[1]) : undefined);
+      logStage('qq_reply_failed', sending, {qq_code: code ? Number(code[1]) : undefined});
+    }
+  }
+  bot.on('message.group', async (event: GroupMessageEvent) => {
+    const reply = handleMessage(event);
+    bot.pendingReplies.add(reply);
+    try {
+      await reply;
+    } finally {
+      bot.pendingReplies.delete(reply);
     }
   });
   return bot;

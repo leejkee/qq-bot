@@ -12,9 +12,11 @@ const env = {BOT_APPID: 'qq-app', BOT_SECRET: 'fixture!', BOT_SANDBOX: 'true',
 const config = readConfig(env);
 
 test('config validation and restart with a changed model', () => {
-  const failed = spawnSync(process.execPath, ['--import','tsx','src/index.ts'], {env: {PATH: process.env.PATH}, encoding: 'utf8'});
+  const failed = spawnSync(process.execPath, ['--import','tsx','src/index.ts'], {env: {PATH: process.env.PATH, NODE_ENV: 'test'}, encoding: 'utf8'});
   assert.equal(failed.status, 78);
   assert.match(failed.stderr, /BOT_APPID/);
+  assert.throws(() => readConfig({...env, NODE_ENV: 'production'}), /QQBOT_CONFIG_DIR/);
+  assert.throws(() => readConfig({...env, NODE_ENV: 'production', QQBOT_CONFIG_DIR: './config'}), /QQBOT_CONFIG_DIR/);
   assert.throws(() => readConfig({...env,BOT_SANDBOX:'0'}), /BOT_SANDBOX/);
   assert.throws(() => readConfig({...env,LLM_CHAT_URL:'http://example.org'}), /LLM_CHAT_URL/);
   assert.equal(readConfig({...env,BOT_SANDBOX:'false',LLM_MODEL:'another'}).llm.model,'another');
@@ -94,10 +96,19 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   await nextTurn();
   assert.equal(sends.length,14);
   assert.ok(sends.every(s => s.data.msg_type === 0));
-  assert.deepEqual(logs.find(log => log.stage === 'qq_reply_api_error'), {
+  const {timestamp, ...apiError} = logs.find(log => log.stage === 'qq_reply_api_error');
+  assert.ok(Number.isFinite(Date.parse(timestamp)));
+  assert.deepEqual(apiError, {
     stage: 'qq_reply_api_error', http_status: 403, qq_code: 11292,
     trace_id: 'test-trace', hint: 'permission', sandbox: true
   });
+  const requestId = logs.find(log => log.stage === 'group_at_received').request_id;
+  const tracked = logs.filter(log => log.request_id === requestId);
+  assert.deepEqual(tracked.map(log => log.stage), [
+    'group_at_received', 'qq_reply_sending', 'qq_ack_sent', 'model_answered', 'qq_reply_sending', 'qq_replied'
+  ]);
+  assert.deepEqual(tracked.filter(log => log.stage === 'qq_reply_sending').map(log => log.msg_seq), [1, 2]);
+  assert.ok(tracked.filter(log => log.stage === 'qq_reply_sending').every(log => !log.has_mention_markup));
   assert.ok(sends.filter(s => s.data.msg_seq === 2).slice(2,5).every(s=>s.data.content==='暂时无法回答，请稍后重新 @ 我。'));
   const questions=['slow','second','timeout','empty','error','sendfail','next'];
   assert.deepEqual(requests,questions.map(content=>({model:env.LLM_MODEL,stream:false,messages:[{role:'user',content}]})));
