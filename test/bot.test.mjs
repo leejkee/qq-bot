@@ -118,7 +118,7 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   for(const packet of [
     {...at('normal','M0-001'),t:'GROUP_MESSAGE_CREATE'},
     {...at('other','<@!other> hi',{mentions:[{id:'other',is_you:false}]}),t:'GROUP_MESSAGE_CREATE'},
-    {...at('same','<@!self> slow',{mentions:[{id:'group-scoped',is_you:true},{id:'unknown'}]}),t:'GROUP_MESSAGE_CREATE'},
+    {...at('unmarked','<@!self> ignored',{mentions:[{id:'self'}]}),t:'GROUP_MESSAGE_CREATE'},
     {...at('dm','dm'),t:'C2C_MESSAGE_CREATE'},at('self','self',{author:{id:'self'}}),
     at('blank','<@!self>  ',{attachments:[{content_type:'image/jpeg'}]})]) {
     assert.equal((await post(packet)).status,200);
@@ -136,21 +136,28 @@ test('signed webhook, independent questions, slow responses, redelivery and send
   const observations = () => logs.filter(log => log.stage === 'qq_group_event_probe');
   const ordinary = observations().filter(log => log.event_type === 'GROUP_MESSAGE_CREATE');
   assert.deepEqual(ordinary.map(log => [log.has_mentions,log.mentions_self_by_id]), [
-    [false,false], [true,false], [true,false]
+    [false,false], [true,false], [true,true]
   ]);
-  assert.deepEqual(ordinary.map(log => log.mention_is_you), [[], [false], [true, null]]);
+  assert.deepEqual(ordinary.map(log => log.mention_is_you), [[], [false], [null]]);
   assert.equal(observations().length,5);
-  const first=at('same','<@!self> slow',{message_reference:{content:'history'},attachments:[{filename:'ignore'}]});
+  const first = {...at('same','<@group-scoped> slow',{
+    mentions:[{id:'group-scoped',is_you:true}], message_reference:{content:'history'},attachments:[{filename:'ignore'}]
+  }),t:'GROUP_MESSAGE_CREATE'};
   assert.equal((await post(first)).status,200);
   await post(first);
+  await post(at('same','<@!self> duplicate'));
   assert.equal(requests.length,1);
   assert.equal(sends.length,1);
   await post(at('same','second',{group_openid:'B',author:{member_openid:'another'}}));
-  const events = observations().slice(-3);
-  assert.match(ordinary[2].message_tag, /^[a-f0-9]{24}$/);
-  assert.equal(events[0].message_tag, ordinary[2].message_tag);
+  await post({...first,d:{...first.d,group_openid:'B'}});
+  const events = observations().slice(-5);
+  assert.match(events[0].message_tag, /^[a-f0-9]{24}$/);
   assert.equal(events[1].message_tag, events[0].message_tag);
-  assert.notEqual(events[2].message_tag, events[0].message_tag);
+  assert.equal(events[2].message_tag, events[0].message_tag);
+  assert.notEqual(events[3].message_tag, events[0].message_tag);
+  assert.equal(events[4].message_tag, events[3].message_tag);
+  assert.deepEqual(events[0].mention_is_you, [true]);
+  assert.equal(events[0].mentions_self_by_id, false);
   assert.ok(events[0].has_reference && events[0].has_attachments);
   assert.doesNotMatch(JSON.stringify(observations()), /机器人昵称|<@!|history|member_openid|slow/);
   slow.resolve();

@@ -3,6 +3,13 @@ import type { Config } from './config.js';
 import type { GroupConversation } from './conversation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 
+function readIsYou(mention: unknown): boolean | null {
+  if (mention && typeof mention === 'object' && 'is_you' in mention && typeof mention.is_you === 'boolean') {
+    return mention.is_you;
+  }
+  return null;
+}
+
 export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
   private probeKey?: Buffer;
   enableEventProbe() {
@@ -12,12 +19,13 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
   override dispatchEvent(type: string, packet: DataPacket) {
     // SDK 1.2.3 maps both GROUP_MESSAGE_CREATE and GROUP_AT_MESSAGE_CREATE to message.group.
     const data = packet.d;
-    if (this.probeKey && data && (type === 'GROUP_MESSAGE_CREATE' || type === 'GROUP_AT_MESSAGE_CREATE')) {
+    if (!data || (type !== 'GROUP_MESSAGE_CREATE' && type !== 'GROUP_AT_MESSAGE_CREATE')) return;
+    const mentions: unknown[] = Array.isArray(data.mentions) ? data.mentions : [];
+    if (this.probeKey) {
       const group = data.group_openid || data.group_id;
       const messageTag = typeof group === 'string' && typeof data.id === 'string'
         ? createHmac('sha256', this.probeKey).update(JSON.stringify([group, data.id])).digest('hex').slice(0, 24)
         : undefined;
-      const mentions: unknown[] = Array.isArray(data.mentions) ? data.mentions : [];
       const mentionsSelf = mentions.some(value => {
         if (!value || typeof value !== 'object' || !('id' in value)) return false;
         return Boolean(value.id && (value.id === this.self_id || value.id === this.config.appid));
@@ -25,14 +33,13 @@ export class GroupBot extends Bot<ReceiverMode.WEBHOOK> {
       console.info(JSON.stringify({
         stage: 'qq_group_event_probe', event_type: type, message_tag: messageTag,
         has_mentions: Array.isArray(data.mentions), mention_count: mentions.length, mentions_self_by_id: mentionsSelf,
-        mention_is_you: mentions.map(value =>
-          value && typeof value === 'object' && 'is_you' in value && typeof value.is_you === 'boolean'
-            ? value.is_you : null),
+        mention_is_you: mentions.map(readIsYou),
         has_reference: Boolean(data.message_reference), has_scene_ext: Array.isArray(data.message_scene?.ext),
         has_elements: Array.isArray(data.msg_elements), has_attachments: Boolean(data.attachments?.length)
       }));
     }
-    if (type !== 'GROUP_AT_MESSAGE_CREATE' || !data || typeof data.content !== 'string') return;
+    if (type === 'GROUP_MESSAGE_CREATE' && !mentions.some(mention => readIsYou(mention) === true)) return;
+    if (typeof data.content !== 'string') return;
     const author = data.author;
     if (!author || author.bot || [author.id, author.member_openid].some(id => id && (id === this.self_id || id === this.config.appid))) return;
     const group = data.group_openid || data.group_id;
