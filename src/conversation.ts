@@ -1,4 +1,4 @@
-export type ChatMessage = {role: 'user' | 'assistant'; content: string};
+export type ChatMessage = {role: 'system' | 'user' | 'assistant'; content: string};
 type Complete = (messages: readonly ChatMessage[]) => Promise<string>;
 
 export class AnswerError extends Error {
@@ -11,10 +11,12 @@ type AnswerResult =
   | {ok: true; text: string}
   | {ok: false; reason: string; status?: number};
 
-export function createGroupConversation(complete: Complete) {
+export function createGroupConversation(complete: Complete, systemPrompt?: string) {
   return async (question: string): Promise<AnswerResult> => {
     try {
-      const text = await complete([{role: 'user', content: question}]);
+      const messages: ChatMessage[] = [{role: 'user', content: question}];
+      if (systemPrompt) messages.unshift({role: 'system', content: systemPrompt});
+      const text = await complete(messages);
       return {ok: true, text};
     } catch (error) {
       if (error instanceof AnswerError) return {ok: false, reason: error.reason, status: error.status};

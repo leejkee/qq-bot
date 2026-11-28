@@ -8,11 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "node --watch --env-file=.env --import tsx src/index.ts --console-probe",
+    "debug": "node --inspect --watch --env-file=.env --import tsx src/index.ts --console-probe",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.mjs",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "probe": "node --env-file=.env --import tsx src/index.ts --console-probe"
   },
   "dependencies": {
     "qq-official-bot": "1.2.3"
