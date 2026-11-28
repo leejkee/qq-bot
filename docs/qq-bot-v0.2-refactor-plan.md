@@ -29,10 +29,11 @@
 
 | 场景 | 本地回放结果 | 真实测试群待记录 |
 | --- | --- | --- |
-| 普通发言、@ 本机器人、@ 他人 | 前台回放中仅至少一项 is_you 严格等于 true 的全量事件触发问答 | 测试群三次均收到 GROUP_MESSAGE_CREATE，mention_is_you 依次为 []、[true]、[false]。三次 ID 比较均未命中。更新代码后待验证真实回复 |
-| 同一消息收到全量和 @ 两种事件 | 两种到达顺序及全量重投均只触发一次问答；另一群同 ID 独立触发 | 同一动作是否有两类投递 |
-| 引用和附件 | 回放识别到引用结构及附件存在 | 分别发一条引用和附件，记录 reference、scene ext、elements 和附件标志 |
-| 成功发送最终回答 | 模拟回执含消息 ID | 此前测试群的 GROUP_AT_MESSAGE_CREATE 实测已收到最终回复成功回执，has_message_id 为 true |
+| 普通发言、@ 本机器人、@ 他人 | 前台回放中仅至少一项 is_you 严格等于 true 的全量事件触发问答 | 用 e979f0e 在测试群复测，三条均收到 GROUP_MESSAGE_CREATE，mention_is_you 依次为 []、[true]、[false]。只有 [true] 触发一次问答并成功发送最终回复 |
+| 同一消息收到全量和 @ 两种事件 | 两种到达顺序及全量重投均只触发一次问答；另一群同 ID 独立触发 | 本轮全量模式仅观察到 GROUP_MESSAGE_CREATE，尚无同一消息双投递样本 |
+| 引用回复 | 回放识别到引用结构存在 | M0-005 实测收到 GROUP_MESSAGE_CREATE，has_elements 和 has_scene_ext 为 true，has_reference 为 false。后续在引用解析时验证索引能否关联原消息 |
+| 图片附件 | 回放识别到附件存在 | 单独发图片收到 GROUP_MESSAGE_CREATE，正文 0 字节，attachment_count 为 1 |
+| 成功发送最终回答 | 模拟回执含消息 ID | 测试群在 GROUP_AT_MESSAGE_CREATE 与 GROUP_MESSAGE_CREATE 两种路径下均收到最终回复成功回执，has_message_id 为 true。全量模式从触发到回复成功约 8.9 秒 |
 
 在获准的测试实例设置 `QQBOT_EVENT_PROBE=true` 后启动，按表逐项操作，记录时间和 `qq_group_event_probe`、`qq_reply_receipt_probe` 各字段。观测默认关闭；消息标记仅可在同一进程生命周期内关联。引用相关标志只表明结构存在，引用索引能否还原原消息仍待实测。若未观察到回调，记录测试群设置和已送达的对照 @ 事件。验证结束后关闭开关。
 
